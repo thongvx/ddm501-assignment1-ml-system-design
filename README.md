@@ -2,7 +2,7 @@
 
 **Topic:** Real-time transaction fraud detection for a mobile e-wallet (hypothetical company "WalletCo", Vietnam).
 
-📄 **Report (PDF):** [DDM501_Assignment1_StudentID_Name.pdf](DDM501_Assignment1_StudentID_Name.pdf)
+📄 **Report (PDF):** [DDM501_Assignment1_25MS13306_VuongXuanThong.pdf](DDM501_Assignment1_25MS13306_VuongXuanThong.pdf)
 
 ## Report structure (follows the assignment brief)
 
@@ -29,6 +29,6 @@
 The report source is [`report/report.html`](report/report.html) (diagrams are inline SVG). Render it with headless Chrome:
 
 ```bash
-./build_pdf.sh                                         # → DDM501_Assignment1_StudentID_Name.pdf
+./build_pdf.sh                                         # → DDM501_Assignment1_25MS13306_VuongXuanThong.pdf
 ./build_pdf.sh DDM501_Assignment1_<ID>_<Name>.pdf      # custom file name
 ```
