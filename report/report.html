@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ML System Design: Real-time Fraud Detection</title>
+<style>
+  @page {
+    size: A4;
+    margin: 17mm 17mm 18mm 17mm;
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 9pt "Helvetica Neue", Helvetica, Arial, sans-serif; color: #666; }
+    @bottom-left { content: "DDM501 – Individual Assignment 1 – ML System Design Document"; font: 9pt "Helvetica Neue", Helvetica, Arial, sans-serif; color: #666; }
+  }
+  @page :first { @bottom-right { content: none; } @bottom-left { content: none; } }
+
+  :root { --ink: #1d2433; --muted: #5b6475; --line: #d5dae3; --accent: #1f5fa8; --soft: #eef3fa; }
+  html { font: 10.5pt/1.5 "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink); }
+  body { margin: 0; }
+  h1, h2, h3, h4 { color: #0f2747; line-height: 1.25; break-after: avoid; }
+  h1 { font-size: 20pt; margin: 0 0 6pt; }
+  h2 { font-size: 15pt; margin: 22pt 0 8pt; padding-bottom: 4pt; border-bottom: 2px solid var(--accent); }
+  h3 { font-size: 12pt; margin: 14pt 0 6pt; }
+  h4 { font-size: 10.5pt; margin: 10pt 0 4pt; }
+  p { margin: 0 0 7pt; text-align: justify; }
+  ul, ol { margin: 0 0 8pt; padding-left: 18pt; }
+  li { margin-bottom: 2pt; }
+  table { width: 100%; border-collapse: collapse; margin: 6pt 0 10pt; font-size: 9pt; break-inside: auto; }
+  tr { break-inside: avoid; }
+  th, td { border: 1px solid var(--line); padding: 4pt 6pt; vertical-align: top; text-align: left; }
+  th { background: var(--soft); color: #0f2747; font-weight: 600; }
+  code { font: 8.8pt Menlo, Consolas, monospace; background: #f3f5f8; padding: 0 2pt; border-radius: 2pt; }
+  .pagebreak { break-before: page; }
+  .note { background: var(--soft); border-left: 3px solid var(--accent); padding: 6pt 9pt; margin: 6pt 0 10pt; font-size: 9.5pt; }
+  .note p:last-child { margin-bottom: 0; }
+  figure { margin: 8pt 0 12pt; break-inside: avoid; }
+  figcaption { font-size: 9pt; color: var(--muted); text-align: center; margin-top: 4pt; }
+  .kpi { font-weight: 600; color: #0f2747; }
+
+  /* Cover */
+  .cover { height: 245mm; display: flex; flex-direction: column; justify-content: space-between; }
+  .cover .top { border-top: 6px solid var(--accent); padding-top: 18mm; }
+  .cover .course { font-size: 11pt; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  .cover h1 { font-size: 28pt; margin: 8mm 0 4mm; }
+  .cover .subtitle { font-size: 15pt; color: var(--muted); margin-bottom: 14mm; }
+  .cover table { width: 70%; font-size: 10.5pt; }
+  .cover td { border: none; border-bottom: 1px solid var(--line); padding: 5pt 4pt; }
+  .cover td:first-child { color: var(--muted); width: 38%; }
+  .cover .abstract { font-size: 10pt; color: var(--ink); border-top: 1px solid var(--line); padding-top: 8pt; }
+
+  /* TOC */
+  .toc ol { list-style: none; padding-left: 0; }
+  .toc ol ol { padding-left: 14pt; }
+  .toc li { margin: 0; } .toc { font-size: 10pt; }
+
+  svg text { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+</style>
+</head>
+<body>
+
+<!-- ============================ COVER ============================ -->
+<section class="cover">
+  <div class="top">
+    <div class="course">DDM501 · AI in DevOps, DataOps, MLOps</div>
+    <h1>ML System Design Document</h1>
+    <div class="subtitle">Real-time Transaction Fraud Detection for a Mobile E-wallet</div>
+    <table>
+      <tr><td>Assignment</td><td>Individual Assignment 1 (weight 5%)</td></tr>
+      <tr><td>Student name</td><td>[Student Name]</td></tr>
+      <tr><td>Student ID</td><td>[Student ID]</td></tr>
+      <tr><td>Submission date</td><td>October 2026</td></tr>
+    </table>
+  </div>
+  <div class="abstract">
+    <p><b>Abstract.</b> This document designs a production machine-learning system that scores every payment of a
+    Vietnamese mobile e-wallet for fraud risk in real time. Today a hand-written rule engine stops less than half of the
+    fraud value while blocking or delaying many legitimate payments. The proposed system adds a gradient-boosted risk
+    model, streaming features and a cost-aware decision policy to the existing payment flow, keeps the rule engine as a
+    safety net, and closes the loop with analyst and chargeback labels. The document covers the problem definition,
+    requirements, a goal and metric hierarchy, the high-level architecture and the main design trade-offs.</p>
+    <p style="font-size:9pt;color:var(--muted)">The company, its numbers and its data are hypothetical but sized to
+    be realistic for a mid-sized e-wallet in Vietnam.</p>
+  </div>
+</section>
+
+<!-- ============================ TOC ============================ -->
+<section class="toc pagebreak">
+  <h2 style="margin-top:0">Table of Contents</h2>
+  <ol>
+    <li>1. Problem Definition
+      <ol>
+        <li>1.1 Context and Background</li><li>1.2 Problem Statement</li><li>1.3 Current Situation</li>
+        <li>1.4 Why Machine Learning</li><li>1.5 Stakeholders</li>
+      </ol></li>
+    <li>2. Requirements Analysis
+      <ol><li>2.1 Functional Requirements</li><li>2.2 Non-Functional Requirements</li><li>2.3 Data Requirements</li></ol></li>
+    <li>3. Goals and Metrics
+      <ol><li>3.1 Goal Hierarchy</li><li>3.2 Business Goals</li><li>3.3 System Goals</li><li>3.4 Model Goals</li>
+      <li>3.5 Baselines and Acceptance Thresholds</li></ol></li>
+    <li>4. High-level Architecture Design
+      <ol><li>4.1 Architecture Overview</li><li>4.2 Data Flow</li><li>4.3 ML Pipeline Stages</li><li>4.4 Component Description</li></ol></li>
+    <li>5. Trade-off Analysis</li>
+    <li>6. Risks and Rollout Plan</li>
+    <li>7. Conclusion</li>
+  </ol>
+
+  <h3>Glossary</h3>
+  <table>
+    <tr><th style="width:22%">Term</th><th>Meaning in this document</th></tr>
+    <tr><td>GMV</td><td>Gross merchandise value: total money moved through the wallet in a period.</td></tr>
+    <tr><td>Fraud loss rate</td><td>Fraud value that the company finally pays for, divided by GMV; quoted in basis points (1 bp = 0.01%).</td></tr>
+    <tr><td>False decline</td><td>A legitimate payment that is blocked or abandoned because of a fraud check.</td></tr>
+    <tr><td>Step-up / challenge</td><td>An extra authentication step (OTP, face match, PIN) required before a payment completes.</td></tr>
+    <tr><td>Chargeback / dispute</td><td>A customer or bank claim that a payment was unauthorised; the main source of confirmed fraud labels.</td></tr>
+    <tr><td>ATO</td><td>Account takeover: a fraudster gains control of a genuine customer's account.</td></tr>
+    <tr><td>PIT join</td><td>Point-in-time join: building training rows only from data that existed at the moment of the payment.</td></tr>
+    <tr><td>PR-AUC</td><td>Area under the precision–recall curve; preferred over ROC-AUC for very rare positive classes.</td></tr>
+  </table>
+</section>
+
+<!-- ============================ 1. PROBLEM ============================ -->
+<h2 class="pagebreak">1. Problem Definition</h2>
+
+<h3>1.1 Context and Background</h3>
+<p><b>WalletCo</b> (a hypothetical company) runs a mobile e-wallet in Vietnam with about <b>6 million monthly active
+users</b> and <b>45,000 merchants</b>. Customers top up from linked bank accounts or cards, pay merchants by QR code,
+transfer money peer-to-peer (P2P), pay bills and buy phone credit. The platform processes about <b>1.2 million
+transactions per day</b> with an average value of 350,000 VND, i.e. roughly <b>12.6 trillion VND of GMV per month</b>.
+Traffic is very uneven: lunchtime, payday, the Tet holiday and "double-day" sales (9.9, 10.10, 11.11) produce peaks of
+10–20× the daily average.</p>
+<p>Because wallet payments are instant and irreversible, a fraudulent payment cannot be "pulled back" once it is
+settled. The main fraud patterns are:</p>
+<ul>
+  <li><b>Account takeover (ATO)</b> – stolen OTPs or SIM-swap, followed by fast transfers to mule accounts;</li>
+  <li><b>Stolen card / bank-link top-up</b> – a fraudster links a stolen card, tops up and cashes out;</li>
+  <li><b>Social-engineering (scam) transfers</b> – the real customer is tricked into sending money;</li>
+  <li><b>Promotion abuse</b> – farms of fake accounts collect cash-back vouchers;</li>
+  <li><b>Merchant collusion</b> – fake QR "sales" used to cash out stolen balances.</li>
+</ul>
+<p>Fraud matters for three reasons: (1) direct financial loss, because WalletCo refunds victims; (2) regulatory
+exposure, since payment intermediaries licensed by the State Bank of Vietnam must manage fraud and protect customer
+data; and (3) trust – a customer who loses money or is wrongly blocked often leaves the platform.</p>
+
+<h3>1.2 Problem Statement</h3>
+<p>For every payment request, WalletCo must decide <b>within the payment's time budget (≤ 300 ms end-to-end, of which at
+most 100 ms is available for fraud checks)</b> whether to approve it, ask for step-up authentication, hold it for manual
+review, or block it. The current decision process has the following measured problems (last 6 months):</p>
+<table>
+  <tr><th style="width:38%">Problem</th><th style="width:20%">Current value</th><th>Impact</th></tr>
+  <tr><td>Fraud loss rate</td><td>≈ 6 bps of GMV (≈ 7.5 bn VND / month)</td><td>Direct loss refunded to customers; rising ~20% per quarter.</td></tr>
+  <tr><td>Share of fraud value stopped before settlement</td><td>≈ 45%</td><td>More than half of the fraud is discovered only after money has left.</td></tr>
+  <tr><td>False decline rate (good payments blocked or abandoned at challenge)</td><td>≈ 1.2% of transactions</td><td>≈ 14,000 good payments disrupted per day; complaints and churn.</td></tr>
+  <tr><td>Manual review queue</td><td>≈ 9,000 cases / day, precision ≈ 4%</td><td>25 analysts cannot keep up; median hold time 3.5 h.</td></tr>
+  <tr><td>Time to react to a new fraud pattern</td><td>2–4 weeks</td><td>New rules are written and tested by hand.</td></tr>
+</table>
+<p>The <b>ML problem</b> is a <b>binary classification</b> task: estimate the probability that a payment is
+fraudulent, <i>P(fraud | payment, customer, device, merchant, history)</i>, and turn that probability into one of four
+actions with a cost-aware policy. The target is to <b>halve the fraud loss rate while reducing false declines and
+analyst workload</b> (exact targets in Section 3).</p>
+
+<h3>1.3 Current Situation</h3>
+<p>Fraud is handled today by a <b>rule engine</b> of about 180 hand-written rules (for example, "block if more than 5
+transfers in 10 minutes to new recipients" or "review if top-up &gt; 20 M VND from a card linked &lt; 24 h ago"), plus
+a fixed daily limit per account. The rules are evaluated synchronously inside the Payment Service. Payments that hit a
+"review" rule are held and sent to a queue that 25 fraud analysts work through in a spreadsheet-like back-office tool.
+Confirmed fraud is learned weeks later through customer complaints and bank chargebacks.</p>
+<p>The approach has reached its limits:</p>
+<ul>
+  <li>Rules look at one or two signals at a time and use fixed cut-offs, so they cannot combine weak signals
+      (new device <i>and</i> unusual hour <i>and</i> new recipient <i>and</i> amount near the limit).</li>
+  <li>Fraudsters learn the cut-offs and stay just below them.</li>
+  <li>Every new rule adds false positives; nobody dares to delete old rules, so the false-decline rate keeps rising.</li>
+  <li>There is no consistent record of <i>why</i> a payment was stopped, which makes customer-support and audit difficult.</li>
+</ul>
+
+<h3>1.4 Why Machine Learning is the Appropriate Approach</h3>
+<ul>
+  <li><b>Pattern complexity:</b> fraud signals are weak individually and strong in combination; gradient-boosted
+      trees learn these non-linear interactions from hundreds of features automatically.</li>
+  <li><b>Labelled history exists:</b> chargebacks, disputes and analyst verdicts give ≈ 350,000 confirmed fraud
+      labels per year among ≈ 440 million transactions – enough for supervised learning despite the 0.08% positive rate.</li>
+  <li><b>Changing adversary:</b> fraud patterns drift monthly; a retrained model adapts in days instead of weeks of
+      manual rule writing.</li>
+  <li><b>Graded output:</b> a calibrated probability allows a <i>graduated</i> response (allow / challenge / review /
+      block) and a cost-based threshold, which binary rules cannot provide.</li>
+  <li><b>Proven practice:</b> ML risk scoring is standard in card networks and large payment companies, and the
+      problem needs one model only, which keeps the system maintainable.</li>
+</ul>
+<p>ML does not replace rules entirely. Regulatory and contractual constraints (sanction lists, daily limits, blocked
+devices) remain as <b>hard rules</b> evaluated before the model, and the rule engine is kept as the fallback when the
+model is unavailable.</p>
+
+<h3>1.5 Stakeholder Identification</h3>
+<table>
+  <tr><th style="width:20%">Stakeholder</th><th style="width:38%">Goals</th><th>Concerns</th></tr>
+  <tr><td><b>Customers</b> (end users)</td><td>Pay quickly; never lose money to fraud.</td><td>Being blocked or challenged on a normal payment; slow payments; how their personal data is used.</td></tr>
+  <tr><td><b>Merchants</b></td><td>High payment success rate at checkout.</td><td>Lost sales from false declines; held settlements.</td></tr>
+  <tr><td><b>Head of Payments</b> (business owner)</td><td>Lower fraud loss, higher conversion and GMV, lower operating cost.</td><td>Return on investment; impact on customer experience; measurable results within 6 months.</td></tr>
+  <tr><td><b>Risk &amp; Fraud Operations</b> (analysts)</td><td>Catch fraud early; small, high-quality review queue.</td><td>Understanding <i>why</i> a payment was flagged; ability to override and to add urgent rules.</td></tr>
+  <tr><td><b>Compliance &amp; Legal</b></td><td>Meet State Bank of Vietnam requirements and personal-data law (Decree 13/2023/ND-CP).</td><td>Explainable decisions, audit trail, data minimisation, no discriminatory features.</td></tr>
+  <tr><td><b>Data Science / ML team</b></td><td>Accurate, maintainable model; fast experimentation.</td><td>Label delay and noise, class imbalance, training–serving skew, reproducibility.</td></tr>
+  <tr><td><b>Platform / SRE team</b></td><td>Stable payment path.</td><td>Latency budget, availability, on-call load, safe rollback, infrastructure cost.</td></tr>
+  <tr><td><b>Customer Support</b></td><td>Resolve "why was I blocked?" tickets quickly.</td><td>Human-readable reason codes and a clear unblock process.</td></tr>
+</table>
+<p>The most important tension is between <b>Risk Operations / Compliance</b> (stop more fraud, explain every
+decision) and <b>Customers / Merchants / Head of Payments</b> (fewer interruptions, more completed payments). The
+design resolves it with a calibrated score and an explicit cost model rather than with a single fixed cut-off.</p>
+
+<!-- ============================ 2. REQUIREMENTS ============================ -->
+<h2>2. Requirements Analysis</h2>
+
+<h3>2.1 Functional Requirements</h3>
+<h4>Core ML functionality</h4>
+<table>
+  <tr><th style="width:9%">ID</th><th>Requirement</th></tr>
+  <tr><td>FR-1</td><td>Score every outgoing payment (QR payment, P2P transfer, bill payment, top-up, withdrawal) with a fraud probability in [0, 1] before authorisation.</td></tr>
+  <tr><td>FR-2</td><td>Map the score, amount and context to one of four actions: <b>ALLOW</b>, <b>CHALLENGE</b> (step-up OTP / face match), <b>REVIEW</b> (hold up to 30 min for an analyst) or <b>BLOCK</b>.</td></tr>
+  <tr><td>FR-3</td><td>Return the top 3 reason codes for every non-ALLOW decision (e.g. <code>NEW_DEVICE</code>, <code>VELOCITY_P2P_10M</code>, <code>RECIPIENT_MULE_RISK</code>), derived from feature attributions.</td></tr>
+  <tr><td>FR-4</td><td>Apply hard rules (sanction list, blocked device, regulatory limits) before the model; hard rules always win.</td></tr>
+  <tr><td>FR-5</td><td>Log every request, feature vector, score, decision, model version and latency for audit, monitoring and training.</td></tr>
+  <tr><td>FR-6</td><td>Ingest labels (analyst verdicts, disputes, chargebacks) and retrain the model on a schedule and on demand.</td></tr>
+  <tr><td>FR-7</td><td>Support shadow mode, canary release and one-click rollback of model versions.</td></tr>
+</table>
+
+<h4>Input / Output specification</h4>
+<table>
+  <tr><th style="width:50%">Input (from Payment Service, JSON over gRPC/REST)</th><th>Output (to Payment Service)</th></tr>
+  <tr><td>
+    <code>transaction_id</code>, <code>timestamp</code>, <code>type</code> (QR, P2P, BILL, TOPUP, WITHDRAW),
+    <code>amount</code>, <code>currency</code>, <code>user_id</code> (pseudonymised), <code>recipient_id</code> or
+    <code>merchant_id</code>, <code>funding_source</code> (balance / bank-link / card token), <code>device_id</code>,
+    <code>ip</code>, <code>app_version</code>, <code>geo_cell</code> (coarse location), <code>session_id</code>.
+    <br><br>Server-side enrichment (not sent by caller): ≈ 120 features from the online feature store – velocity
+    counts, recipient and merchant risk, device age, account age, KYC level, behavioural baselines.
+  </td><td>
+    <code>transaction_id</code>,<br><code>risk_score</code> (calibrated probability, 0–1),<br>
+    <code>decision</code> ∈ {ALLOW, CHALLENGE, REVIEW, BLOCK},<br><code>reason_codes</code> (≤ 3),<br>
+    <code>model_version</code>, <code>policy_version</code>,<br><code>fallback_used</code> (bool),<br><code>latency_ms</code>.
+  </td></tr>
+</table>
+
+<h4>Integration requirements</h4>
+<ul>
+  <li><b>Payment Service:</b> synchronous call with a hard timeout of 150 ms; the Payment Service owns the final authorisation.</li>
+  <li><b>Event bus (Kafka):</b> the Payment Service, login service and device SDK publish events; the fraud system consumes them for streaming features and publishes its decisions.</li>
+  <li><b>Authentication Service:</b> executes CHALLENGE actions (OTP, face match) and reports the outcome back as a signal.</li>
+  <li><b>Case Management tool:</b> receives REVIEW cases with score and reasons; returns analyst verdicts as labels.</li>
+  <li><b>Data warehouse / data lake:</b> source of historical data and destination of decision logs; dispute and chargeback files from partner banks arrive daily.</li>
+  <li><b>Customer Support CRM:</b> read-only view of decisions and reason codes for a given transaction.</li>
+</ul>
+
+<h4>User interaction requirements</h4>
+<ul>
+  <li><b>Customers</b> see a short, non-revealing message (“For your safety, please confirm with OTP”) and never the score.</li>
+  <li><b>Fraud analysts</b> see a case page with score, reason codes, recent account activity and linked accounts; they can approve, reject, or mark the account; each verdict is stored as a label.</li>
+  <li><b>Risk managers</b> can change decision thresholds and add emergency rules through a configuration UI, with four-eyes approval and versioning – no code deployment needed.</li>
+  <li><b>ML engineers</b> use a dashboard to compare model versions and promote or roll back a model.</li>
+</ul>
+
+<h3>2.2 Non-Functional Requirements</h3>
+<table>
+  <tr><th style="width:17%">Category</th><th>Requirement</th></tr>
+  <tr><td><b>Performance</b></td><td>
+    Scoring API latency (including feature lookup and model inference): <b>p50 ≤ 30 ms, p99 ≤ 100 ms</b>.
+    Streaming features visible to the scorer within <b>≤ 5 s</b> of the event (p95).
+    Analyst case page loads in ≤ 2 s.</td></tr>
+  <tr><td><b>Throughput &amp; scalability</b></td><td>
+    Average 15 TPS, normal daily peak 150 TPS, event peak (Tet, 11.11) <b>300 TPS</b>; design target <b>1,000 TPS</b> to
+    cover 3 years of growth. Stateless scoring pods on Kubernetes with horizontal autoscaling on CPU and request rate;
+    Redis Cluster for online features; Kafka topics partitioned by <code>user_id</code>. Pre-scale before known events.</td></tr>
+  <tr><td><b>Reliability</b></td><td>
+    Availability <b>≥ 99.95%</b> per month (≤ 22 min downtime), deployed across 2 availability zones.
+    <b>Graceful degradation:</b> if the scorer times out or errors, the Payment Service falls back to the existing rule
+    engine; if only some features are missing, the model scores with default values and the decision is marked
+    <code>degraded</code>. Fail-safe policy: low-value payments fail open (rules only); payments above 5 M VND are
+    challenged. Circuit breaker opens after 5% errors in 30 s. No single point of failure.</td></tr>
+  <tr><td><b>Maintainability</b></td><td>
+    Automatic <b>weekly retraining</b> on a rolling 12-month window; emergency retrain within 24 h when drift alerts fire.
+    All models versioned with data snapshot, code commit and metrics; rollback to the previous version in <b>≤ 5 min</b>.
+    Feature definitions kept as code and shared by training and serving. Monitoring of latency, error rate, score
+    distribution, feature drift (PSI), decision mix, and delayed precision/recall once labels mature.</td></tr>
+  <tr><td><b>Security &amp; compliance</b></td><td>
+    mTLS between services; encryption at rest; role-based access to raw data; full audit log of decisions, threshold
+    changes and model promotions kept for 5 years; explanations available for every non-ALLOW decision.</td></tr>
+</table>
+
+<h3>2.3 Data Requirements</h3>
+<h4>Data sources</h4>
+<table>
+  <tr><th style="width:23%">Source</th><th style="width:42%">Content</th><th>Arrival / use</th></tr>
+  <tr><td>Transaction events</td><td>All payment attempts with amount, type, parties, funding source, status.</td><td>Real-time (Kafka) for features; daily snapshot to the lake for training.</td></tr>
+  <tr><td>Account &amp; KYC profile</td><td>Account age, KYC level, linked banks/cards (tokenised), limits.</td><td>Change-data-capture from the core database.</td></tr>
+  <tr><td>Device &amp; session</td><td>Device fingerprint, OS, app version, IP, coarse location, login and OTP events.</td><td>Real-time from the mobile SDK and login service.</td></tr>
+  <tr><td>Merchant data</td><td>Category (MCC), age, historical refund and dispute rates.</td><td>Daily batch.</td></tr>
+  <tr><td><b>Labels</b></td><td>Analyst verdicts; customer fraud reports and disputes; bank chargebacks; confirmed mule accounts.</td><td>Verdicts within hours; disputes within days; chargebacks up to <b>60 days</b> later.</td></tr>
+  <tr><td>External (optional)</td><td>Telco SIM-swap signal; shared industry mule-account list.</td><td>API lookup; subject to contracts and consent.</td></tr>
+</table>
+
+<h4>Data quality</h4>
+<ul>
+  <li><b>Label delay:</b> a transaction is treated as "mature" only after 60 days; recent data is used for monitoring with
+      partial labels, and training uses only mature windows (plus confirmed fraud from recent weeks).</li>
+  <li><b>Label noise:</b> some disputes are "friendly fraud" (customer lies); unreviewed transactions are assumed
+      legitimate. Label sources are weighted by reliability and audited monthly on a sample.</li>
+  <li><b>Class imbalance:</b> ≈ 0.08% positives by count (≈ 0.25% by value). Handled with down-sampling of negatives and
+      class weights; evaluation always on the original distribution.</li>
+  <li><b>Training–serving skew:</b> features are defined once in the feature store and computed by the same code for
+      online and offline; a daily job compares online-logged features with recomputed offline features.</li>
+  <li><b>Validation gates:</b> schema, null rate, value ranges and distribution checks (Great Expectations) on every
+      ingestion; a failed check stops the training pipeline.</li>
+  <li><b>Leakage control:</b> point-in-time joins only; features that are written <i>after</i> a decision (e.g.
+      "account blocked") are excluded.</li>
+</ul>
+
+<h4>Privacy</h4>
+<ul>
+  <li>Processing is based on the legitimate purpose of fraud prevention stated in the terms of service and privacy notice,
+      in line with Vietnam's Decree 13/2023/ND-CP on personal data protection.</li>
+  <li><b>Data minimisation:</b> no names, phone numbers or ID-card numbers in the feature store; user IDs are
+      pseudonymised; card numbers are tokenised (PCI DSS scope stays outside the ML system); location is reduced to coarse
+      cells.</li>
+  <li><b>No sensitive attributes</b> (gender, ethnicity, religion, health) are used as features; fairness is checked by
+      comparing false-decline rates across regions, age bands and account tenure.</li>
+  <li>Encryption in transit and at rest; access to raw data only for named roles and logged; retention 5 years for
+      audit data, 24 months for model-training feature tables.</li>
+</ul>
+
+<h4>Data volume</h4>
+<table>
+  <tr><th>Item</th><th>Estimate</th></tr>
+  <tr><td>Transactions</td><td>1.2 M / day → ≈ 440 M / year</td></tr>
+  <tr><td>All raw events (transactions, logins, device, decisions)</td><td>≈ 15 M events / day, ≈ 25 GB / day compressed → ≈ 9 TB / year</td></tr>
+  <tr><td>Positive labels</td><td>≈ 1,000 / day → ≈ 350,000 / year</td></tr>
+  <tr><td>Training set (12 months, negatives down-sampled 1:50)</td><td>≈ 18 M rows × ≈ 120 features ≈ 10 GB Parquet</td></tr>
+  <tr><td>Online feature store</td><td>≈ 6 M active users + 45 k merchants + 8 M devices → ≈ 30 GB in Redis</td></tr>
+</table>
+
+<!-- ============================ 3. GOALS & METRICS ============================ -->
+<h2>3. Goals and Metrics</h2>
+
+<h3>3.1 Goal Hierarchy</h3>
+<p>Goals are organised top-down: each model goal exists because it supports a system goal, and each system goal
+because it supports a business goal. This keeps the data-science work tied to money and customer experience rather than
+to an abstract accuracy number.</p>
+
+<figure>
+<svg viewBox="0 0 1000 300" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Goal hierarchy">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5b6475"/>
+    </marker>
+  </defs>
+  <g font-size="14.5">
+    <rect x="300" y="10" width="400" height="58" rx="8" fill="#1f5fa8"/>
+    <text x="500" y="34" fill="#fff" text-anchor="middle" font-weight="700">BUSINESS GOAL</text>
+    <text x="500" y="54" fill="#fff" text-anchor="middle">Cut fraud loss in half without hurting conversion</text>
+
+    <rect x="20" y="115" width="300" height="70" rx="8" fill="#e3edf9" stroke="#1f5fa8"/>
+    <text x="170" y="138" text-anchor="middle" font-weight="700" fill="#0f2747">SYSTEM: decide in time</text>
+    <text x="170" y="158" text-anchor="middle" fill="#1d2433">p99 ≤ 100 ms, 99.95% available,</text>
+    <text x="170" y="175" text-anchor="middle" fill="#1d2433">safe fallback</text>
+
+    <rect x="350" y="115" width="300" height="70" rx="8" fill="#e3edf9" stroke="#1f5fa8"/>
+    <text x="500" y="138" text-anchor="middle" font-weight="700" fill="#0f2747">SYSTEM: right action</text>
+    <text x="500" y="158" text-anchor="middle" fill="#1d2433">≤ 0.5% false declines, review queue</text>
+    <text x="500" y="175" text-anchor="middle" fill="#1d2433">within analyst capacity</text>
+
+    <rect x="680" y="115" width="300" height="70" rx="8" fill="#e3edf9" stroke="#1f5fa8"/>
+    <text x="830" y="138" text-anchor="middle" font-weight="700" fill="#0f2747">SYSTEM: stay current</text>
+    <text x="830" y="158" text-anchor="middle" fill="#1d2433">fresh features, weekly retrain,</text>
+    <text x="830" y="175" text-anchor="middle" fill="#1d2433">drift detected in &lt; 24 h</text>
+
+    <rect x="20" y="230" width="300" height="58" rx="8" fill="#fff" stroke="#5b6475"/>
+    <text x="170" y="253" text-anchor="middle" font-weight="700" fill="#0f2747">MODEL: rank fraud first</text>
+    <text x="170" y="272" text-anchor="middle" fill="#1d2433">PR-AUC, recall @ 0.5% FPR</text>
+
+    <rect x="350" y="230" width="300" height="58" rx="8" fill="#fff" stroke="#5b6475"/>
+    <text x="500" y="253" text-anchor="middle" font-weight="700" fill="#0f2747">MODEL: trustworthy score</text>
+    <text x="500" y="272" text-anchor="middle" fill="#1d2433">calibration (ECE), reason codes</text>
+
+    <rect x="680" y="230" width="300" height="58" rx="8" fill="#fff" stroke="#5b6475"/>
+    <text x="830" y="253" text-anchor="middle" font-weight="700" fill="#0f2747">MODEL: robust &amp; fair</text>
+    <text x="830" y="272" text-anchor="middle" fill="#1d2433">stable over time and across segments</text>
+  </g>
+  <g stroke="#5b6475" stroke-width="1.6" fill="none" marker-end="url(#ah)">
+    <path d="M170,115 L170,92 L440,92 L440,70"/>
+    <path d="M500,115 L500,70"/>
+    <path d="M830,115 L830,92 L560,92 L560,70"/>
+    <path d="M170,230 L170,187"/>
+    <path d="M500,230 L500,187"/>
+    <path d="M830,230 L830,187"/>
+    <path d="M320,259 L350,259" marker-end="none"/>
+  </g>
+</svg>
+<figcaption>Figure 1 – Goal hierarchy: model goals serve system goals, which serve the business goal.</figcaption>
+</figure>
+
+<h3>3.2 Business Goals</h3>
+<table>
+  <tr><th style="width:5%">#</th><th style="width:35%">Goal</th><th>Metric (how it is measured)</th></tr>
+  <tr><td>B1</td><td>Reduce money lost to fraud</td><td><span class="kpi">Fraud loss rate</span> = refunded fraud value ÷ GMV, monthly, measured on matured (60-day) cohorts.</td></tr>
+  <tr><td>B2</td><td>Protect conversion and customer experience</td><td><span class="kpi">False decline rate</span> = good payments blocked or abandoned at challenge ÷ all payments; <span class="kpi">challenge rate</span>; complaints about blocked payments per 10,000 users.</td></tr>
+  <tr><td>B3</td><td>Lower fraud-operations cost</td><td><span class="kpi">Review cases per day</span> and <span class="kpi">review precision</span> (share of reviewed cases confirmed as fraud); median hold time.</td></tr>
+  <tr><td>B4</td><td>React faster to new fraud patterns</td><td>Days from first detected new pattern to a deployed model or rule covering it.</td></tr>
+</table>
+
+<h3>3.3 System Goals</h3>
+<table>
+  <tr><th style="width:5%">#</th><th style="width:35%">Goal</th><th>Metric</th></tr>
+  <tr><td>S1</td><td>Decide within the payment budget</td><td>p50 / p99 scoring latency; timeout rate.</td></tr>
+  <tr><td>S2</td><td>Be available and degrade safely</td><td>Monthly availability; share of decisions using the fallback; error rate.</td></tr>
+  <tr><td>S3</td><td>Use fresh data</td><td>Streaming feature lag (event → online store), p95.</td></tr>
+  <tr><td>S4</td><td>Keep the model current and safe to change</td><td>Retraining pipeline success rate; time to roll back; drift alerts acknowledged in &lt; 24 h.</td></tr>
+  <tr><td>S5</td><td>Explain and audit decisions</td><td>Share of non-ALLOW decisions with reason codes and complete audit record (target 100%).</td></tr>
+</table>
+
+<h3>3.4 Model Goals</h3>
+<table>
+  <tr><th style="width:5%">#</th><th style="width:35%">Goal</th><th>Metric</th></tr>
+  <tr><td>M1</td><td>Rank fraudulent payments above legitimate ones</td><td><span class="kpi">PR-AUC</span> on a time-based hold-out month (primary offline metric); ROC-AUC as secondary.</td></tr>
+  <tr><td>M2</td><td>Catch fraud at an acceptable interruption rate</td><td><span class="kpi">Recall at 0.5% FPR</span> (count-based) and <span class="kpi">value-weighted recall</span> at the same operating point.</td></tr>
+  <tr><td>M3</td><td>Produce a calibrated probability for the cost policy</td><td>Expected calibration error (ECE) and Brier score.</td></tr>
+  <tr><td>M4</td><td>Stay robust and fair</td><td>Recall and FPR per segment (new vs. old accounts, transaction type, region); score PSI week-over-week.</td></tr>
+</table>
+
+<h3>3.5 Baselines and Acceptance Thresholds</h3>
+<p>The <b>baseline</b> is the current rule engine, replayed on the same hold-out month. A simple logistic-regression model
+is the second baseline, to prove that a more complex model is worth its cost. A new model is promoted only if it meets
+every "minimum to launch" value offline <i>and</i> during a 2-week shadow run.</p>
+<table>
+  <tr><th style="width:30%">Metric</th><th style="width:17%">Baseline (rules today)</th><th style="width:18%">Minimum to launch</th><th style="width:17%">Target (6 months)</th><th>Level</th></tr>
+  <tr><td>Fraud loss rate (bps of GMV)</td><td>6.0</td><td>≤ 4.5</td><td>≤ 3.0</td><td>Business</td></tr>
+  <tr><td>False decline rate</td><td>1.2%</td><td>≤ 0.8%</td><td>≤ 0.5%</td><td>Business</td></tr>
+  <tr><td>Review cases / day · precision</td><td>9,000 · 4%</td><td>≤ 5,000 · ≥ 8%</td><td>≤ 3,000 · ≥ 15%</td><td>Business</td></tr>
+  <tr><td>Scoring latency p99</td><td>n/a (rules ≈ 20 ms)</td><td>≤ 120 ms</td><td>≤ 100 ms</td><td>System</td></tr>
+  <tr><td>Availability (monthly)</td><td>99.9%</td><td>99.9%</td><td>99.95%</td><td>System</td></tr>
+  <tr><td>Streaming feature lag p95</td><td>n/a</td><td>≤ 30 s</td><td>≤ 5 s</td><td>System</td></tr>
+  <tr><td>PR-AUC (hold-out month)</td><td>0.22 (rules) / 0.38 (log. reg.)</td><td>≥ 0.50</td><td>≥ 0.60</td><td>Model</td></tr>
+  <tr><td>Recall @ 0.5% FPR (count)</td><td>40%</td><td>≥ 65%</td><td>≥ 75%</td><td>Model</td></tr>
+  <tr><td>Value-weighted recall @ 0.5% FPR</td><td>45%</td><td>≥ 70%</td><td>≥ 80%</td><td>Model</td></tr>
+  <tr><td>Calibration ECE</td><td>n/a</td><td>≤ 0.02</td><td>≤ 0.01</td><td>Model</td></tr>
+  <tr><td>Worst-segment FPR ÷ overall FPR</td><td>2.5×</td><td>≤ 2.0×</td><td>≤ 1.5×</td><td>Model (fairness)</td></tr>
+  <tr><td>Score PSI week-over-week</td><td>–</td><td colspan="2">&lt; 0.1 normal · 0.1–0.25 investigate · &gt; 0.25 retrain</td><td>Model (drift)</td></tr>
+</table>
+<div class="note"><p><b>Operating point.</b> Thresholds are not fixed by hand. For each action the policy chooses the
+threshold that minimises expected cost: <i>cost = P(fraud) × amount × loss-share − (1 − P(fraud)) × friction cost</i>,
+where friction cost is the estimated revenue and churn cost of interrupting a good customer (≈ 2% abandonment for a
+challenge, ≈ 15% for a block). The cut-offs are then capped so that the review queue stays within analyst capacity.</p></div>
+
+<!-- ============================ 4. ARCHITECTURE ============================ -->
+<h2 class="pagebreak">4. High-level Architecture Design</h2>
+
+<h3>4.1 Architecture Overview</h3>
+<p>The system has three planes that share one feature definition layer: an <b>online plane</b> that scores each
+payment synchronously, a <b>streaming plane</b> that keeps behavioural features fresh, and an <b>offline plane</b> that
+builds training data, trains, evaluates and releases models. Monitoring and the analyst feedback loop connect the
+planes.</p>
+
+<figure>
+<svg viewBox="0 0 1000 640" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="System architecture">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1a7f4b"/>
+    </marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+    </marker>
+  </defs>
+
+  <!-- lanes -->
+  <rect x="5" y="5" width="990" height="225" rx="10" fill="#eef4fc" stroke="#9db8dd"/>
+  <text x="18" y="26" font-size="12" font-weight="700" fill="#1f5fa8">ONLINE PLANE · synchronous scoring (p99 ≤ 100 ms)</text>
+  <rect x="5" y="240" width="990" height="105" rx="10" fill="#f1f8f4" stroke="#9cccb1"/>
+  <text x="18" y="340" font-size="12" font-weight="700" fill="#1a7f4b">STREAMING PLANE · ≤ 5 s</text>
+  <rect x="5" y="390" width="990" height="245" rx="10" fill="#fdf6ec" stroke="#e2c08d"/>
+  <text x="20" y="560" font-size="12" font-weight="700" fill="#b45309">OFFLINE PLANE</text><text x="20" y="577" font-size="11" fill="#b45309">training · evaluation</text><text x="20" y="593" font-size="11" fill="#b45309">release · monitoring</text>
+
+  <g font-size="12" fill="#1d2433" text-anchor="middle">
+    <!-- online row 1 -->
+    <rect x="20" y="62" width="130" height="56" rx="7" fill="#fff" stroke="#64748b"/>
+    <text x="85" y="86">Customer app /</text><text x="85" y="102">Merchant QR</text>
+
+    <rect x="185" y="62" width="140" height="56" rx="7" fill="#fff" stroke="#64748b"/>
+    <text x="255" y="86" font-weight="700">Payment Service</text><text x="255" y="102">(owns authorisation)</text>
+
+    <rect x="370" y="62" width="160" height="56" rx="7" fill="#1f5fa8"/>
+    <text x="450" y="86" fill="#fff" font-weight="700">Fraud Scoring API</text><text x="450" y="102" fill="#fff">FastAPI · K8s pods</text>
+
+    <rect x="575" y="62" width="160" height="56" rx="7" fill="#fff" stroke="#1f5fa8"/>
+    <text x="655" y="86" font-weight="700">Decision Policy</text><text x="655" y="102">hard rules + thresholds</text>
+
+    <rect x="770" y="45" width="210" height="90" rx="7" fill="#fff" stroke="#64748b"/>
+    <rect x="780" y="54" width="92" height="30" rx="5" fill="#dcfce7"/><text x="826" y="74">ALLOW</text>
+    <rect x="878" y="54" width="92" height="30" rx="5" fill="#fef9c3"/><text x="924" y="74">CHALLENGE</text>
+    <rect x="780" y="96" width="92" height="30" rx="5" fill="#ffedd5"/><text x="826" y="116">REVIEW</text>
+    <rect x="878" y="96" width="92" height="30" rx="5" fill="#fee2e2"/><text x="924" y="116">BLOCK</text>
+
+    <!-- online row 2 -->
+    <rect x="290" y="155" width="150" height="56" rx="7" fill="#fff" stroke="#1a7f4b"/>
+    <text x="365" y="179" font-weight="700">Online Feature Store</text><text x="365" y="195">Redis Cluster (Feast)</text>
+
+    <rect x="470" y="155" width="160" height="56" rx="7" fill="#fff" stroke="#1f5fa8"/>
+    <text x="550" y="179" font-weight="700">Model + Explainer</text><text x="550" y="195">LightGBM · TreeSHAP</text>
+
+    <rect x="770" y="155" width="210" height="56" rx="7" fill="#fff" stroke="#b45309"/>
+    <text x="875" y="179" font-weight="700">Case Management UI</text><text x="875" y="195">fraud analysts · verdicts</text>
+
+    <!-- streaming -->
+    <rect x="160" y="272" width="285" height="56" rx="7" fill="#fff" stroke="#1a7f4b"/>
+    <text x="302" y="296" font-weight="700">Kafka event bus</text><text x="302" y="312">transactions · logins · device · decisions</text>
+
+    <rect x="490" y="272" width="210" height="56" rx="7" fill="#fff" stroke="#1a7f4b"/>
+    <text x="595" y="296" font-weight="700">Stream Processor (Flink)</text><text x="595" y="312">velocity &amp; behaviour features</text>
+
+    <!-- offline row a -->
+    <rect x="20" y="430" width="150" height="62" rx="7" fill="#fff" stroke="#b45309"/>
+    <text x="95" y="452" font-weight="700">Label Sources</text><text x="95" y="468">verdicts · disputes</text><text x="95" y="483">chargebacks (≤ 60 d)</text>
+
+    <rect x="205" y="430" width="200" height="62" rx="7" fill="#fff" stroke="#b45309"/>
+    <text x="305" y="455" font-weight="700">Data Lake</text><text x="305" y="472">S3 / MinIO · Parquet, by day</text>
+
+    <rect x="440" y="430" width="170" height="62" rx="7" fill="#fff" stroke="#b45309"/>
+    <text x="525" y="455" font-weight="700">Offline Feature Store</text><text x="525" y="472">Feast · PIT joins</text>
+
+    <rect x="650" y="430" width="150" height="62" rx="7" fill="#fff" stroke="#b45309"/>
+    <text x="725" y="455" font-weight="700">MLflow</text><text x="725" y="472">tracking + registry</text>
+
+    <!-- offline row b -->
+    <rect x="205" y="535" width="405" height="84" rx="7" fill="#fff" stroke="#b45309"/>
+    <text x="407" y="556" font-weight="700">Airflow training pipeline (weekly / on drift)</text>
+    <g font-size="11">
+      <rect x="215" y="568" width="70" height="36" rx="5" fill="#fdf0dc"/><text x="250" y="590">Validate</text>
+      <rect x="294" y="568" width="70" height="36" rx="5" fill="#fdf0dc"/><text x="329" y="590">Features</text>
+      <rect x="373" y="568" width="70" height="36" rx="5" fill="#fdf0dc"/><text x="408" y="590">PIT join</text>
+      <rect x="452" y="568" width="70" height="36" rx="5" fill="#fdf0dc"/><text x="487" y="590">Train</text>
+      <rect x="531" y="568" width="70" height="36" rx="5" fill="#fdf0dc"/><text x="566" y="590">Eval gate</text>
+    </g>
+
+    <rect x="650" y="535" width="330" height="84" rx="7" fill="#fff" stroke="#b45309"/>
+    <text x="815" y="558" font-weight="700">Monitoring &amp; Alerting</text>
+    <text x="815" y="577">Prometheus + Grafana: latency, errors, decision mix</text>
+    <text x="815" y="594">Evidently: feature / score drift (PSI)</text>
+    <text x="815" y="611">delayed precision &amp; recall on matured labels</text>
+  </g>
+
+  <!-- online arrows -->
+  <g stroke="#334155" stroke-width="1.6" fill="none" marker-end="url(#a)">
+    <path d="M150,90 L185,90"/>
+    <path d="M325,90 L370,90"/>
+    <path d="M530,90 L575,90"/>
+    <path d="M735,90 L770,90"/>
+    <path d="M420,118 L380,155"/>
+    <path d="M490,118 L530,155"/>
+    <path d="M826,126 L826,155"/>
+  </g>
+  <text x="352" y="82" font-size="10" fill="#334155" text-anchor="middle">score</text>
+  
+  <!-- streaming arrows -->
+  <g stroke="#1a7f4b" stroke-width="1.6" fill="none" marker-end="url(#ag)">
+    <path d="M220,118 L220,272"/>
+    <path d="M445,300 L490,300"/>
+    <path d="M560,272 L410,211"/>
+  </g>
+  <text x="226" y="200" font-size="10" fill="#1a7f4b">events</text>
+  <text x="455" y="262" font-size="10" fill="#1a7f4b">upsert</text>
+
+  <!-- offline arrows -->
+  <g stroke="#b45309" stroke-width="1.6" fill="none" marker-end="url(#ao)">
+    <path d="M302,328 L302,430"/>
+    <path d="M170,461 L205,461"/>
+    <path d="M405,461 L440,461"/>
+    <path d="M305,492 L305,535"/>
+    <path d="M525,492 L525,535"/>
+    <path d="M610,545 L668,492"/>
+    <path d="M650,580 L610,580"/>
+    <path d="M960,211 L960,372 L95,372 L95,430"/>
+  </g>
+  <text x="308" y="365" font-size="10" fill="#b45309">sink</text>
+  <text x="440" y="367" font-size="10" fill="#b45309" text-anchor="middle">analyst verdicts → labels</text>
+  <text x="630" y="574" font-size="10" fill="#b45309" text-anchor="middle">retrain</text>
+  <text x="652" y="516" font-size="10" fill="#b45309">register</text>
+
+  <!-- deployment (dashed) -->
+  <path d="M725,430 L725,226 L550,226 L550,211" stroke="#7c3aed" stroke-width="1.8" stroke-dasharray="6 4" fill="none" marker-end="url(#a)"/>
+  <text x="733" y="290" font-size="10" fill="#7c3aed">promote:</text>
+  <text x="733" y="303" font-size="10" fill="#7c3aed">shadow → canary</text>
+  <text x="733" y="316" font-size="10" fill="#7c3aed">→ production</text>
+</svg>
+<figcaption>Figure 2 – High-level architecture. Solid arrows are data flows; the dashed arrow is model release.</figcaption>
+</figure>
+
+<h3>4.2 Data Flow</h3>
+<h4>A. Online scoring path (one payment)</h4>
+<ol>
+  <li>The customer confirms a payment in the app; the <b>Payment Service</b> validates balance and limits and calls the
+      <b>Fraud Scoring API</b> with the transaction payload (timeout 150 ms).</li>
+  <li>The API fetches ≈ 120 pre-computed features for the user, device, recipient and merchant from the <b>online feature
+      store</b> in one batched Redis call (≈ 5 ms) and adds request-time features (amount ÷ user's 30-day median, hour of day,
+      is-new-recipient).</li>
+  <li>The <b>LightGBM model</b> (loaded in-process) returns a calibrated probability (≈ 3 ms); <b>TreeSHAP</b> computes the
+      top contributing features, which are mapped to reason codes.</li>
+  <li>The <b>Decision Policy</b> first applies hard rules, then compares the score with amount-dependent thresholds and
+      returns ALLOW / CHALLENGE / REVIEW / BLOCK with reason codes.</li>
+  <li>The Payment Service executes the action (calls the Authentication Service for CHALLENGE, holds funds for REVIEW) and
+      publishes the payment event and the decision record to <b>Kafka</b>.</li>
+</ol>
+<h4>B. Streaming feature path</h4>
+<ol start="6">
+  <li><b>Flink</b> consumes payment, login and device events, keyed by user, device and recipient, and maintains sliding-window
+      aggregates (count and sum of transfers in 10 min / 1 h / 24 h, distinct recipients, failed-OTP count, new-device flag).</li>
+  <li>Updated aggregates are upserted into Redis within seconds, so the <i>next</i> payment of a fast-moving fraudster already
+      sees them.</li>
+</ol>
+<h4>C. Offline learning and feedback path</h4>
+<ol start="8">
+  <li>A Kafka sink writes all events and decision logs to the <b>data lake</b>, partitioned by day. Labels from analyst
+      verdicts, disputes and partner-bank chargeback files are loaded daily.</li>
+  <li><b>Airflow</b> runs the training pipeline weekly: validate → build features → point-in-time label join → train →
+      evaluate. The candidate model and its metrics are logged to <b>MLflow</b> and registered.</li>
+  <li>A candidate that passes the evaluation gate is promoted through <b>shadow → canary → production</b>. Monitoring compares
+      live behaviour with the training baseline and can trigger an early retrain.</li>
+</ol>
+
+<h3>4.3 ML Pipeline Stages</h3>
+<figure>
+<svg viewBox="0 0 1000 190" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ML pipeline stages">
+  <defs>
+    <marker id="p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+  </defs>
+  <g font-size="12" text-anchor="middle" fill="#1d2433">
+    <rect x="10" y="20" width="140" height="70" rx="8" fill="#e3edf9" stroke="#1f5fa8"/>
+    <text x="80" y="45" font-weight="700">1. Ingestion</text><text x="80" y="62">Kafka → lake,</text><text x="80" y="77">CDC, label files</text>
+
+    <rect x="175" y="20" width="140" height="70" rx="8" fill="#e3edf9" stroke="#1f5fa8"/>
+    <text x="245" y="45" font-weight="700">2. Validation</text><text x="245" y="62">schema, nulls,</text><text x="245" y="77">ranges, drift</text>
+
+    <rect x="340" y="20" width="150" height="70" rx="8" fill="#e3edf9" stroke="#1f5fa8"/>
+    <text x="415" y="45" font-weight="700">3. Preprocessing</text><text x="415" y="62">features as code,</text><text x="415" y="77">PIT label join</text>
+
+    <rect x="515" y="20" width="140" height="70" rx="8" fill="#e3edf9" stroke="#1f5fa8"/>
+    <text x="585" y="45" font-weight="700">4. Training</text><text x="585" y="62">LightGBM, time-</text><text x="585" y="77">split, calibration</text>
+
+    <rect x="680" y="20" width="140" height="70" rx="8" fill="#e3edf9" stroke="#1f5fa8"/>
+    <text x="750" y="45" font-weight="700">5. Evaluation</text><text x="750" y="62">vs. baseline,</text><text x="750" y="77">slices, cost</text>
+
+    <rect x="845" y="20" width="145" height="70" rx="8" fill="#1f5fa8"/>
+    <text x="917" y="45" font-weight="700" fill="#fff">6. Release</text><text x="917" y="62" fill="#fff">registry → shadow</text><text x="917" y="77" fill="#fff">→ canary → prod</text>
+
+    <rect x="680" y="120" width="310" height="56" rx="8" fill="#fff" stroke="#1f5fa8"/>
+    <text x="835" y="143" font-weight="700">7. Online inference</text><text x="835" y="160">feature lookup + model + policy, p99 ≤ 100 ms</text>
+
+    <rect x="290" y="120" width="360" height="56" rx="8" fill="#fff" stroke="#b45309"/>
+    <text x="470" y="143" font-weight="700">8. Monitoring &amp; feedback</text><text x="470" y="160">drift, delayed labels, analyst verdicts → retrain</text>
+  </g>
+  <g stroke="#334155" stroke-width="1.6" fill="none" marker-end="url(#p)">
+    <path d="M150,55 L175,55"/><path d="M315,55 L340,55"/><path d="M490,55 L515,55"/>
+    <path d="M655,55 L680,55"/><path d="M820,55 L845,55"/>
+    <path d="M917,90 L917,120"/>
+    <path d="M680,148 L650,148"/>
+    <path d="M290,148 L80,148 L80,90" stroke="#b45309"/>
+  </g>
+  <text x="185" y="140" font-size="10" fill="#b45309" text-anchor="middle">new labels / retrain trigger</text>
+</svg>
+<figcaption>Figure 3 – ML pipeline stages and the feedback loop.</figcaption>
+</figure>
+
+<table>
+  <tr><th style="width:17%">Stage</th><th>Key decisions</th></tr>
+  <tr><td>1. Ingestion</td><td>Events from Kafka are written to Parquet by day; core-database tables are copied by change-data-capture; partner-bank chargeback files are parsed and matched to <code>transaction_id</code>.</td></tr>
+  <tr><td>2. Validation</td><td>Great Expectations suites per table; checks for schema changes, null rates, value ranges, duplicate IDs, sudden volume changes. Failure stops the run and alerts the on-call engineer.</td></tr>
+  <tr><td>3. Preprocessing &amp; features</td><td>Feature groups: <i>transaction</i> (amount, type, hour, amount z-score), <i>velocity</i> (counts and sums in 10 min–30 d), <i>device &amp; session</i> (device age, accounts per device, failed OTPs), <i>counter-party</i> (recipient account age, inbound fan-in, merchant dispute rate), <i>account</i> (tenure, KYC level, linked sources). Point-in-time join of labels; label window 60 days.</td></tr>
+  <tr><td>4. Training</td><td>LightGBM binary classifier; training on months M−13 … M−2, validation on M−1 (mature labels only); negatives down-sampled 1:50 with weights restored; hyper-parameters tuned with Optuna; isotonic calibration on the validation month.</td></tr>
+  <tr><td>5. Evaluation</td><td>Compared with the current production model, the rule engine and logistic regression on the same month: PR-AUC, recall at 0.5% FPR, value-weighted recall, ECE, per-segment metrics, simulated business cost. Gate: all "minimum to launch" thresholds and no segment worse than production by more than 10%.</td></tr>
+  <tr><td>6. Release</td><td>Registered in MLflow with data snapshot ID and git commit. <b>Shadow</b> 2 weeks (scores logged, not used) → <b>canary</b> 10% of traffic for 1 week → 100%. Automatic rollback if latency, error rate or decision mix leaves its band.</td></tr>
+  <tr><td>7. Inference</td><td>Model artefact baked into the scoring image and loaded in memory; same feature code as training through the feature store.</td></tr>
+  <tr><td>8. Monitoring</td><td>Real-time: latency, errors, decision mix, fallback rate. Daily: feature and score PSI, online/offline feature parity. Weekly: precision/recall on newly matured labels; analyst override rate.</td></tr>
+</table>
+
+<h3>4.4 Component Description</h3>
+<table>
+  <tr><th style="width:18%">Component</th><th style="width:36%">Purpose and responsibility</th><th style="width:22%">Technologies considered</th><th>Choice and reason</th></tr>
+  <tr><td>Fraud Scoring API</td><td>Receive request, gather features, call model and policy, return decision, emit log.</td><td>FastAPI, gRPC (Go), BentoML, Seldon</td><td><b>FastAPI + Uvicorn</b> on Kubernetes: team skill in Python, model in-process (no extra hop), meets latency with LightGBM.</td></tr>
+  <tr><td>Model</td><td>Estimate fraud probability from tabular features.</td><td>Logistic regression, XGBoost, LightGBM, deep sequence models</td><td><b>LightGBM</b>: best accuracy on tabular data for the latency budget; native missing-value handling; TreeSHAP explanations.</td></tr>
+  <tr><td>Decision Policy</td><td>Hard rules + cost-based thresholds → action; versioned config editable by risk managers.</td><td>Drools, custom Python, OPA</td><td><b>Python module with YAML config</b> stored in git, four-eyes approval; simple and auditable.</td></tr>
+  <tr><td>Online Feature Store</td><td>Low-latency read of latest feature values.</td><td>Redis, DynamoDB, Cassandra</td><td><b>Redis Cluster via Feast</b>: sub-ms reads, team already runs Redis; Feast keeps online and offline definitions identical.</td></tr>
+  <tr><td>Event bus</td><td>Durable, ordered event stream for features, logs and the lake.</td><td>Kafka, Pulsar, Kinesis</td><td><b>Kafka</b>: already used by the Payment Service.</td></tr>
+  <tr><td>Stream Processor</td><td>Sliding-window aggregates with exactly-once state.</td><td>Flink, Spark Structured Streaming, Kafka Streams</td><td><b>Flink</b>: event-time windows with low latency; Kafka Streams as a lighter alternative.</td></tr>
+  <tr><td>Data Lake &amp; Offline Store</td><td>Historical events, labels, training snapshots.</td><td>S3/MinIO + Parquet, Delta Lake, BigQuery</td><td><b>S3-compatible storage + Parquet</b> (Delta Lake later for time travel); Feast for point-in-time joins.</td></tr>
+  <tr><td>Orchestration</td><td>Schedule and track ingestion, validation, training, evaluation.</td><td>Airflow, Kubeflow Pipelines, Prefect</td><td><b>Airflow</b>: mature, simple retries and back-fills; team has experience.</td></tr>
+  <tr><td>Experiment tracking &amp; registry</td><td>Record runs, metrics, artefacts; manage model stages.</td><td>MLflow, Weights &amp; Biases, SageMaker Registry</td><td><b>MLflow</b>: open source, self-hosted (data stays in-country), model stages.</td></tr>
+  <tr><td>Data validation</td><td>Stop bad data before training.</td><td>Great Expectations, TFDV, Pandera</td><td><b>Great Expectations</b>: readable suites, HTML reports for audits.</td></tr>
+  <tr><td>Monitoring</td><td>System health, drift, delayed model quality.</td><td>Prometheus/Grafana, Evidently, Datadog</td><td><b>Prometheus + Grafana</b> for service metrics; <b>Evidently</b> jobs for drift reports; alerts to on-call.</td></tr>
+  <tr><td>Case Management UI</td><td>Analyst review, verdicts, overrides.</td><td>Build in-house, vendor tool</td><td>Extend the existing back-office tool with score, reasons and a verdict button that writes labels.</td></tr>
+  <tr><td>CI/CD</td><td>Test and ship code, pipelines and models.</td><td>GitHub Actions, GitLab CI, Argo CD</td><td><b>GitHub Actions</b> for tests and image builds; <b>Argo CD</b> for deployment to Kubernetes.</td></tr>
+</table>
+
+<!-- ============================ 5. TRADE-OFFS ============================ -->
+<h2>5. Trade-off Analysis</h2>
+<p>Five significant trade-offs shaped the design. For each, the options, the analysis and the decision are given.</p>
+
+<h3>5.1 Accuracy vs. Latency</h3>
+<p><b>Options.</b> (a) Logistic regression – &lt; 1 ms, PR-AUC ≈ 0.38; (b) LightGBM with ≈ 500 trees – ≈ 3 ms,
+PR-AUC ≈ 0.58 (expected); (c) a sequence model (Transformer over the last 100 events) or a graph neural network
+over the transfer graph – possibly +0.03–0.05 PR-AUC but 30–80 ms on GPU plus heavier feature retrieval.</p>
+<p><b>Analysis.</b> The fraud check has at most 100 ms of the payment's 300 ms budget, and feature retrieval plus network
+already use ≈ 20–30 ms. A deep model would consume most of the remaining budget at p99, need GPU serving and make
+explanations harder. Most of the signal that a sequence or graph model would learn can be approximated with
+engineered velocity and counter-party features computed by Flink.</p>
+<p><b>Decision.</b> <b>LightGBM</b> with engineered streaming features. Graph signals (e.g. "recipient is two hops from a
+known mule") are pre-computed offline every hour and served as features, moving the expensive part out of the
+request path. A deep model may be revisited as an asynchronous second-stage scorer for REVIEW cases only.</p>
+
+<h3>5.2 Freshness vs. Cost</h3>
+<p><b>Options.</b> (a) Daily batch features only; (b) streaming features for fast-changing signals plus batch for slow ones;
+(c) everything streaming plus continuous (online) model training.</p>
+<p><b>Analysis.</b> ATO attacks empty an account in minutes: a "transfers in the last 10 minutes" feature that is a day old is
+useless. On the other hand, merchant dispute rates or account tenure change slowly and do not justify a streaming
+job. Continuous training is expensive, hard to validate, and can be poisoned by fraudsters; labels arrive with days or
+weeks of delay anyway, so the model weights cannot be truly "real-time".</p>
+<p><b>Decision.</b> <b>Hybrid (b)</b>: ≈ 25 velocity and session features via Flink (≤ 5 s lag), the rest computed daily; model
+retrained <b>weekly</b>, not continuously, with emergency retraining on drift. This gives most of the freshness benefit for
+roughly a third of the cost of an all-streaming design.</p>
+
+<h3>5.3 Simplicity vs. Performance</h3>
+<p><b>Options.</b> (a) One global model; (b) separate models per transaction type (P2P, QR, top-up, withdrawal);
+(c) a global model plus a stacked ensemble.</p>
+<p><b>Analysis.</b> Per-type models could fit each fraud pattern better, but they multiply training pipelines, monitoring
+dashboards, thresholds and on-call complexity by four, and the smaller types would have too few positive labels. The
+assignment's guidance and the team size (3 data scientists, 2 ML engineers) both favour one model.</p>
+<p><b>Decision.</b> <b>One global LightGBM</b> with transaction type as a feature and <b>per-type thresholds</b> in the decision
+policy. Segment metrics are monitored; a separate model would be introduced only if one segment stays below its target
+for two consecutive months.</p>
+
+<h3>5.4 Automation vs. Control</h3>
+<p><b>Options.</b> (a) The model decides everything automatically; (b) every flagged payment is reviewed by a human;
+(c) graduated automation with human oversight.</p>
+<p><b>Analysis.</b> Full automation is fast but can block many good customers when the model misbehaves (e.g. after a
+data bug), and regulators expect human accountability for significant decisions. Full human review is impossible at
+1.2 M payments per day and adds hours of delay.</p>
+<p><b>Decision.</b> <b>Graduated automation (c):</b> low risk → ALLOW automatically; medium → CHALLENGE (the customer, not an
+analyst, resolves it); high-value medium-high → REVIEW by an analyst; very high → BLOCK, with an easy appeal through
+customer support. Humans control the <i>policy</i> (thresholds, hard rules) through a reviewed config, model releases need
+an approval in MLflow, and automatic guards roll back a model if the decision mix moves outside its normal band.</p>
+
+<h3>5.5 Privacy vs. Personalisation</h3>
+<p><b>Options.</b> (a) Use every available signal, including contacts, precise GPS and installed apps; (b) use only
+transaction-related and coarse device data; (c) (b) plus privacy-preserving extras with consent.</p>
+<p><b>Analysis.</b> Rich personal data would improve the model a little, but it conflicts with data-minimisation under Decree
+13/2023/ND-CP, increases the impact of a breach, and erodes customer trust. Experience in fraud detection shows that most
+of the predictive power comes from behaviour (velocity, device, counter-party), not from personal attributes.</p>
+<p><b>Decision.</b> <b>(b)</b> with pseudonymised IDs, coarse location cells and no sensitive attributes. Optional signals
+(telco SIM-swap check) are used only with consent and a contract. Fairness metrics per segment are reported monthly to
+Compliance.</p>
+
+<h3>5.6 Summary</h3>
+<table>
+  <tr><th style="width:24%">Trade-off</th><th style="width:30%">Chosen side</th><th>What we give up · how it is mitigated</th></tr>
+  <tr><td>Accuracy vs. latency</td><td>LightGBM, ≈ 3 ms</td><td>Some accuracy of deep models · graph features pre-computed offline; second-stage model possible for REVIEW.</td></tr>
+  <tr><td>Freshness vs. cost</td><td>Hybrid streaming + batch; weekly retrain</td><td>Slow features up to 24 h old · only fast signals streamed; drift-triggered retrain.</td></tr>
+  <tr><td>Simplicity vs. performance</td><td>One global model</td><td>Per-segment fit · per-type thresholds and segment monitoring.</td></tr>
+  <tr><td>Automation vs. control</td><td>Graduated automation</td><td>Some fraud passes as CHALLENGE · humans own policy; automatic rollback guards.</td></tr>
+  <tr><td>Privacy vs. personalisation</td><td>Behavioural data only</td><td>A little predictive power · consented external signals; fairness reporting.</td></tr>
+</table>
+
+<!-- ============================ 6. RISKS ============================ -->
+<h2>6. Risks and Rollout Plan</h2>
+<table>
+  <tr><th style="width:28%">Risk</th><th>Mitigation</th></tr>
+  <tr><td>Fraudsters adapt to the model</td><td>Weekly retraining; monitoring of new-pattern clusters; analysts can add emergency rules without a deployment.</td></tr>
+  <tr><td>Feedback loop bias (blocked payments never get labels)</td><td>Keep a small random "control" sample (0.5% of low-value flagged payments are challenged instead of blocked) to observe outcomes; use challenge results as weak labels.</td></tr>
+  <tr><td>Training–serving skew</td><td>Shared feature definitions in Feast; daily parity check; shadow period before every release.</td></tr>
+  <tr><td>Outage of Redis, Flink or the scorer</td><td>Timeouts, circuit breaker and fallback to the rule engine; multi-AZ deployment; runbooks and on-call.</td></tr>
+  <tr><td>Unfair impact on a customer segment</td><td>No sensitive features; monthly segment report; threshold caps per segment.</td></tr>
+</table>
+<p><b>Rollout (≈ 6 months).</b> Month 1–2: data pipelines, feature store, offline baseline. Month 3: first model, shadow mode
+next to the rule engine. Month 4: canary on 10% of P2P transfers, then all P2P. Month 5: all transaction types; analyst
+UI with reasons. Month 6: retire overlapping rules, review results against the targets in Section 3.5.</p>
+
+<!-- ============================ 7. CONCLUSION ============================ -->
+<h2>7. Conclusion</h2>
+<p>The proposed design replaces a saturated rule engine with a single, explainable LightGBM risk model fed by streaming
+and batch features, and a cost-aware decision policy that turns scores into graduated actions. It fits within the
+100 ms latency budget, degrades safely to the existing rules, and keeps humans in control of policy and releases. The goal
+hierarchy ties every model metric to a system and business outcome: halving the fraud loss rate (6 → 3 bps of GMV),
+cutting false declines from 1.2% to 0.5% and shrinking the review queue by two thirds. The chosen trade-offs favour
+simplicity, freshness where it matters, and privacy, leaving clear upgrade paths (graph features, a second-stage model)
+once the base system has proven its value in production.</p>
+
+</body>
+</html>
